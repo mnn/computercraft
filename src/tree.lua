@@ -10,9 +10,12 @@ local importantSlots = {slot_FUEL, slot_LEAVES, slot_SAPLINGS, slot_WOOD}
 
 local debug = true
 
+-- width, depth and heigh of tree farm (inner free space) in blocks 
 local maxPos = { 16, 7, 7 }
 
 local saveFile = "/tree_save"
+
+local fuelChestDist = 3
 
 -- END of settings
 -- turtle must be in front of a chest with one block free above flood (so it's above saplings) facing from the chest
@@ -23,9 +26,10 @@ local saveFile = "/tree_save"
 -- sapling | torch    - level -1
 -- floor              - level -2
 
--- map of sample configuration, X - wall, C - chest, T - turtle, " " - air/wood/leaves
+-- map of sample configuration, X - wall, C - chest, T - turtle, " " - air/wood/leaves. bottom chest is fuel chest (for fuelChestDist ~ 2)
 -- XXXXXX
 -- CT   X
+-- X    X
 -- C    X
 -- XXXXXX
 
@@ -46,6 +50,8 @@ relPos[pY] = 0
 relPos[pZ] = 0
 
 local move_matrix = { {1, 0}, {0, 1}, {-1, 0}, {0, -1} }
+
+local version = "1.0"
 
 local takesLeft = true
 local goHome = false
@@ -254,6 +260,8 @@ local function wander()
 				tw_turn_right()
 			end
 		end
+		
+		while turtle.suckDown() do end
 	else
 		if safeToDig() then turtle.dig() end
 		if not tw_move_forward() then nextTimeDoTurn = true end
@@ -273,7 +281,7 @@ local function findSameItem(slotNumber)
 		ret = ret - 1
 		-- skip slot we are comparing to
 		if ret == slotNumber then ret = ret - 1 end
-	until turtle.compareTo(ret) or ret < 1
+	until ret < 1 or turtle.compareTo(ret) 
 	if ret < 1 then ret = 0 end
 
 	return ret
@@ -344,9 +352,42 @@ local function plantSapling()
 
 end
 
+local function isFuel(slot)
+	turtle.select(slot_FUEL)
+	return turtle.compareTo(slot)
+end
+
+local function dumpLoot()
+	for i = 1, 16 do
+		if not isSignificant(i) and not isFuel(i) then
+			turtle.select(i)
+			turtle.drop()
+		end
+	end
+end
+
+local function countFuelStacks()
+	local c = 0
+	turtle.select(slot_FUEL)
+	for i = 1, 16 do
+		if turtle.compareTo(i) then
+			c = c + 1
+		end
+	end
+	return c
+end
+
+local function atHome()
+	return relPos[pX] == 0 and relPos[pY] == 0 and relPos[pZ] == 0
+end
+
+-- ----
 -- main
 
+print("Tree Chopper "..version.." created by *monnef*")
+
 local c = checkSlots()
+local stepsFromLastDump = 0
 if c ~= true then
 	print("missing sample in slot labeled: "..c)
 	print("expected inv: fuel@"..slot_FUEL..", wood@"..slot_WOOD..", leaves@"..slot_LEAVES..", saplings@"..slot_SAPLINGS)
@@ -430,13 +471,32 @@ while myState ~= state_SHUTTINGDOWN do
 	end
 
 	if goHome then
-		if relPos[pX] == 0 and relPos[pY] == 0 and relPos[pZ] == 0 then
+		if atHome() then
 			-- I'm home!
 			goHome = false
 			newState = state_SHUTTINGDOWN
 			print("home reached, shutting down")
 		end
 	end
+
+	if atHome() and newState ~= state_SHUTTINGDOWN and stepsFromLastDump > 50 then
+		stepsFromLastDump = 0
+		print("dumping loot")
+		for i = 1, 3 do resupplySignificantSlot(slot_SAPLINGS) end
+		while dir ~= 2 do tw_turn_left() end
+		dumpLoot()
+		tw_turn_left()
+
+		if countFuelStacks() < 3 then		
+			for i = 1, fuelChestDist do tw_move_forward() end
+			tw_turn_right()
+			for i = 1, 2 do turtle.suck() end
+			tw_turn_left()
+		end
+
+		tw_turn_left()
+	end
+	stepsFromLastDump = stepsFromLastDump + 1
 
 	--term.write(myState.."->"..newState.." ")
 	myState = newState
